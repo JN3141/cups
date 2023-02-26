@@ -590,6 +590,8 @@ print_device(const char *uri,		/* I - Device URI */
   {
     g.read_thread_stop = 1;
 
+    // JN
+    fputs("DEBUG: print_device acquiring read_thread_mutex\n", stderr);
     pthread_mutex_lock(&g.read_thread_mutex);
 
     if (!g.read_thread_done)
@@ -602,9 +604,13 @@ print_device(const char *uri,		/* I - Device URI */
 
       while (!g.read_thread_done)
       {
+        fputs("DEBUG: print_device waiting\n", stderr);
 	if (pthread_cond_timedwait(&g.read_thread_cond, &g.read_thread_mutex,
 				   &cond_timeout) != 0)
+        {
+          fputs("DEBUG: print_device got inside the block\n", stderr);
 	  break;
+      }
       }
 
       /*
@@ -1728,17 +1734,22 @@ static void *read_thread(void *reference)
   {
    /*
     * Try reading from the OUT (to host) endpoint...
+     * JN
     */
 
-    rbytes     = sizeof(readbuffer);
+    rbytes = sizeof(readbuffer);
+    fprintf(stderr, "DEBUG: read_thread attempting a read\n");
     readstatus = libusb_bulk_transfer(g.printer->handle,
 				      g.printer->read_endp,
 				      readbuffer, rbytes,
-				      &rbytes, 60000);
+                                      &rbytes, 250);
     if (readstatus == LIBUSB_SUCCESS && rbytes > 0)
     {
       fprintf(stderr, "DEBUG: Read %d bytes of back-channel data...\n", (int)rbytes);
+      fprintf(stderr, "DEBUG: read_thread LIBUSB_SUCCESS=%d\n", LIBUSB_SUCCESS);
+      fprintf(stderr, "DEBUG: read_thread readstatus=%d\n", readstatus);
       cupsBackChannelWrite((const char *)readbuffer, (size_t)rbytes, 1.0);
+      fprintf(stderr, "DEBUG: read_thread finished cupsBackChannelWrite\n");
     }
     else if (readstatus == LIBUSB_ERROR_TIMEOUT)
       fputs("DEBUG: Got USB transaction timeout during read.\n", stderr);
@@ -1746,6 +1757,8 @@ static void *read_thread(void *reference)
       fputs("DEBUG: Got USB pipe stalled during read.\n", stderr);
     else if (readstatus == LIBUSB_ERROR_INTERRUPTED)
       fputs("DEBUG: Got USB return aborted during read.\n", stderr);
+    else
+      fprintf(stderr, "DEBUG: read_thread read nothing\n");
 
    /*
     * Make sure this loop executes no more than once every 250 milliseconds...
@@ -1753,9 +1766,13 @@ static void *read_thread(void *reference)
 
     if ((readstatus != LIBUSB_SUCCESS || rbytes == 0) &&
 	 (g.wait_eof || !g.read_thread_stop))
+    {
+      fprintf(stderr, "DEBUG: read_thread slehp\n");
       usleep(250000);
   }
-  while (g.wait_eof || !g.read_thread_stop);
+  } while (g.wait_eof || !g.read_thread_stop);
+
+  fprintf(stderr, "DEBUG: read_thread broke out of the loop\n");
 
  /*
   * Let the main thread know that we have completed the read thread...
